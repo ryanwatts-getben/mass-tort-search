@@ -1,0 +1,6 @@
+boto3
+tqdm
+python-dotenv
+pinecone-client
+openai
+httpx
