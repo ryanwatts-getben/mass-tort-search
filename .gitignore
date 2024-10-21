@@ -2,7 +2,10 @@
 __pycache__/
 *.py[cod]
 *$py.class
+<<<<<<< HEAD
 .venv/
+=======
+>>>>>>> 56f989b73121aa8323520fb881f1e0a8dd8bb914
 
 # C extensions
 *.so
