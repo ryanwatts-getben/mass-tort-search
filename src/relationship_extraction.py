@@ -46,13 +46,13 @@ def extract_custom_relationships(entities):
 
 def determine_relationship_type(category1, category2):
     """Determine the type of relationship between two entity categories."""
-    if category1 == 'symptoms' and category2 == 'diagnostic_procedures':
+    if category1 == 'PROBLEM' and category2 == 'TEST':
         return 'diagnosed_by'
-    elif category1 == 'symptoms' and category2 == 'treatment_options':
+    elif category1 == 'PROBLEM' and category2 == 'TREATMENT':
         return 'treated_by'
-    elif category1 == 'icd10_codes' and category2 == 'complications':
-        return 'may_lead_to'
-    elif category1 == 'lab_results' and category2 == 'treatment_options':
-        return 'indicates'
+    elif category1 == 'PROBLEM' and category2 == 'DRUG':
+        return 'treated_with'
+    elif category1 == 'PROBLEM' and category2 == 'ANATOMY':
+        return 'located_in'
     else:
         return 'related_to'

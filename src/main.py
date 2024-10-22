@@ -9,7 +9,7 @@ from relationship_extraction import extract_relationships
 from vectorization import vectorize_documents
 from pinecone_operations import upload_to_pinecone, search_pinecone, index_name
 from scoring import score_and_rank_results
-from utils import load_search_criteria, generate_report, load_config, setup_logging
+from utils import load_config, load_search_criteria, generate_report, setup_logging
 from datasets import Dataset
 from torch.utils.data import DataLoader
 import pandas as pd
@@ -58,33 +58,36 @@ def process_batch(batch):
 def main():
     try:
         # 1. Data Ingestion
-        logger.info("Starting data ingestion from S3")
         raw_data = ingest_data_from_s3(s3, AWS_BUCKET_NAME)
-        
         if raw_data.empty:
             logger.error("No data retrieved from S3. Exiting pipeline.")
             return
         
-        # Process data in batches
-        batch_size = 32  # Adjust this based on your memory constraints
-        for i in range(0, len(raw_data), batch_size):
-            batch = raw_data[i:i+batch_size]
-            processed_batch = process_batch(batch)
-            
-            # Upload to Pinecone
-            upload_to_pinecone(processed_batch, index_name)
-        
-        # 6. Search and Score
-        search_criteria = load_search_criteria(config)
+        # 2. Preprocessing
+        preprocessed_data = preprocess_data(raw_data)
+
+        # 3. Entity Extraction
+        preprocessed_data = extract_entities(preprocessed_data)
+
+        # 4. Relationship Extraction
+        preprocessed_data = extract_relationships(preprocessed_data)
+
+        # 5. Vectorization
+        preprocessed_data = vectorize_documents(preprocessed_data)
+
+        # 6. Upload to Pinecone
+        upload_to_pinecone(preprocessed_data, index_name)
+
+        # 7. Search and Score (if needed)
+        search_criteria = load_search_criteria(config)  # Pass the config to load_search_criteria
         search_results = search_pinecone(search_criteria, index_name)
-        
-        # 7. Rank and Report
         final_results = score_and_rank_results(search_results)
+
+        # 8. Generate Report (if needed)
         generate_report(final_results)
 
     except Exception as e:
         logger.error(f"An error occurred in the main function: {str(e)}", exc_info=True)
-        raise
 
 if __name__ == "__main__":
     main()

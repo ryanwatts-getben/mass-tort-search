@@ -11,8 +11,8 @@ logger = setup_logging()
 
 # Load configuration
 config = load_config('config/config.yaml')
-metadata_config = config.get('metadata', {})
-MAX_METADATA_SIZE = metadata_config.get('max_size', 40000)  # Default to 40KB if not specified
+model_config = config.get('models', {})
+bert_model_name = model_config.get('bert', "medicalai/ClinicalBERT")
 
 # Load environment variables
 load_dotenv()
@@ -25,9 +25,10 @@ PINECONE_REGION = os.getenv('PINECONE_REGION', 'us-east-1')  # Default to 'us-ea
 pc = Pinecone(api_key=PINECONE_API_KEY)
 
 # Load pre-trained ClinicalBERT model
-tokenizer = AutoTokenizer.from_pretrained("medicalai/ClinicalBERT")
-model = AutoModel.from_pretrained("medicalai/ClinicalBERT")
+tokenizer = AutoTokenizer.from_pretrained(bert_model_name)
+model = AutoModel.from_pretrained(bert_model_name)
 index_name = config.get('pinecone', {}).get('index_name', 'medical-records4')
+MAX_METADATA_SIZE = config.get('metadata', {}).get('max_size', 40000)
 
 def ensure_index_exists(index_name):
     """
@@ -84,7 +85,7 @@ def upload_to_pinecone(processed_data, index_name):
                     # Truncate metadata
                     while metadata_size > MAX_METADATA_SIZE:
                         for key in list(metadata.keys()):
-                            if isinstance(metadata[key], list):
+                            if key in ['PROBLEM', 'TEST', 'TREATMENT', 'DRUG', 'ANATOMY']:
                                 if len(metadata[key]) > 1:
                                     metadata[key] = metadata[key][:-1]
                                 else:

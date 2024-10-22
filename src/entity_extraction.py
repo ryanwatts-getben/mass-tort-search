@@ -1,12 +1,18 @@
 from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
 import torch
 import logging
+from utils import load_config
 
 logger = logging.getLogger(__name__)
 
+# Load configuration
+config = load_config('config/config.yaml')
+model_config = config.get('models', {})
+
 # Initialize ClinicalBERT model and tokenizer for NER
-ner_tokenizer = AutoTokenizer.from_pretrained("medicalai/ClinicalBERT")
-ner_model = AutoModelForTokenClassification.from_pretrained("medicalai/ClinicalBERT")
+ner_model_name = model_config.get('ner', "samrawal/bert-base-uncased_clinical-ner")
+ner_tokenizer = AutoTokenizer.from_pretrained(ner_model_name)
+ner_model = AutoModelForTokenClassification.from_pretrained(ner_model_name)
 
 # Initialize NER pipeline
 device = 0 if torch.cuda.is_available() else -1
@@ -38,9 +44,9 @@ def extract_entities_from_text(text):
                 entities[ent_label] = []
             entities[ent_label].append(ent_text)
 
-    # Remove duplicates
+    # Remove duplicates and sort
     for key in entities:
-        entities[key] = list(set(entities[key]))
+        entities[key] = sorted(list(set(entities[key])))
 
     logger.info(f"Extracted entities: {entities}")
     logger.debug(f"Full NER results: {all_ner_results}")

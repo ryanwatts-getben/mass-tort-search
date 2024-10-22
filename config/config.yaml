@@ -6,12 +6,12 @@ aws:
     prefixes:
       - "1225"
       - "26192"
-      - "279534"
-      - "279451"
+#      - "279534"
+#      - "279451"
 
 # Pinecone Configuration
 pinecone:
-  index_name: medical-records15
+  index_name: medical-records18
   dimension: 768  # BioBERT dimension
 
 # Data Processing
@@ -21,8 +21,9 @@ data_processing:
 
 # Model Paths
 models:
-  ner: "zero_shot_ner"
-  bert: "dmis-lab/biobert-v1.1"
+  ner: "samrawal/bert-base-uncased_clinical-ner"
+  bert: "medicalai/ClinicalBERT"
+  zero_shot: "facebook/bart-large-mnli"
 
 # Entity Extraction
 entity_extraction:
@@ -233,4 +234,5 @@ scoring:
 metadata:
   text_limit: 100  # Limit for 'text' field in characters
   entity_limit: 5  # Limit for number of entities per type
-  max_size: 40000  # Maximum metadata size in bytes (40KB)
+  max_size: 39000  # Maximum metadata size in bytes (40KB)
+  MAX_METADATA_SIZE: 40000  # Maximum metadata size in bytes (40KB)

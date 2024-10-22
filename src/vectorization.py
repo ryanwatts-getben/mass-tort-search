@@ -5,12 +5,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Load pre-trained ClinicalBERT model
-tokenizer = AutoTokenizer.from_pretrained("medicalai/ClinicalBERT")
-model = AutoModel.from_pretrained("medicalai/ClinicalBERT")
-
 # Load configuration
 config = load_config('config/config.yaml')
+model_config = config.get('models', {})
+bert_model_name = model_config.get('bert', "medicalai/ClinicalBERT")
+
+# Load pre-trained ClinicalBERT model
+tokenizer = AutoTokenizer.from_pretrained(bert_model_name)
+model = AutoModel.from_pretrained(bert_model_name)
+
+# Load configuration
 metadata_config = config.get('metadata', {})
 TEXT_LIMIT = metadata_config.get('text_limit', 100)
 ENTITY_LIMIT = metadata_config.get('entity_limit', 5)

@@ -68,11 +68,8 @@ def batch_generator(iterable, batch_size):
         yield batch
 
 def load_search_criteria(config):
-    """Load search criteria from config.yaml."""
-    import yaml
-    with open('config/config.yaml', 'r') as file:
-        config = yaml.safe_load(file)
-    return config['search_criteria']
+    """Load search criteria from config."""
+    return config.get('search_criteria', {})
 
 def generate_report(results):
     """Generate a report from the final ranked results."""
