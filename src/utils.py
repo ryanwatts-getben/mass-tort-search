@@ -85,3 +85,21 @@ def get_s3_txt_files(s3_client, bucket, prefix):
     """Get list of .txt files from S3 bucket with given prefix."""
     response = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix)
     return [obj['Key'] for obj in response.get('Contents', []) if obj['Key'].endswith('.txt')]
+
+
+def extract_case_and_document_id(key):
+    try:
+        # Remove '_full.txt' suffix
+        key_without_suffix = key.replace('_full.txt', '')
+        # Split the key by '/'
+        key_parts = key_without_suffix.split('/')
+        if len(key_parts) >= 2:
+            case_id = key_parts[-2]  # <directory>
+            document_id = key_parts[-1]  # <filename>
+        else:
+            case_id = 'unknown_case_id'
+            document_id = key_parts[-1]
+        return case_id, document_id
+    except Exception as e:
+        logger.error(f"Error extracting case_id and document_id from key {key}: {e}")
+        return 'unknown_case_id', 'unknown_document_id'

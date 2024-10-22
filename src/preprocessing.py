@@ -3,6 +3,7 @@ import nltk
 from nltk.tokenize import sent_tokenize
 import pandas as pd
 import logging
+from utils import extract_case_and_document_id
 
 logger = logging.getLogger(__name__)
 
@@ -12,24 +13,18 @@ except LookupError:
     print("Downloading NLTK punkt tokenizer...")
     nltk.download('punkt', quiet=True)
 
-def download_nltk_resources():
-    try:
-        nltk.download('punkt', quiet=True)
-    except Exception as e:
-        logger.warning(f"Failed to download NLTK punkt: {str(e)}")
-
-download_nltk_resources()
-
 def preprocess_data(raw_data):
-    # Convert the list of dictionaries to a DataFrame
     df = pd.DataFrame(raw_data)
     
-    # Ensure 'Content' column exists and rename it to 'text' if necessary
     if 'Content' in df.columns:
         df = df.rename(columns={'Content': 'text'})
     elif 'text' not in df.columns:
         raise ValueError("Input data does not contain 'Content' or 'text' column")
 
+    # Extract case_id and document_id
+    df['case_id'] = df['Key'].apply(lambda x: extract_case_and_document_id(x)[0])
+    df['document_id'] = df['Key'].apply(lambda x: extract_case_and_document_id(x)[1])
+    
     # Apply cleaning and tokenization
     df['cleaned_text'] = df['text'].apply(clean_text)
     
@@ -51,5 +46,4 @@ def clean_text(text):
     return text
 
 def fallback_sentence_tokenize(text):
-    # Simple fallback sentence tokenization
     return re.split(r'(?<=[.!?])\s+', text)
