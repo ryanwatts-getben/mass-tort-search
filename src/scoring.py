@@ -14,7 +14,7 @@ def calculate_custom_score(result):
     """Calculate custom score based on multiple factors."""
     # Load scoring weights from config
     config = load_config('config/config.yaml')
-    weights = config['scoring']
+    weights = config.get('scoring', {})
     
     similarity_score = result['score']
     metadata = result['metadata']
@@ -25,8 +25,8 @@ def calculate_custom_score(result):
     
     # Calculate final score
     final_score = (
-        weights['similarity_weight'] * similarity_score +
-        weights['entity_match_weight'] * entity_match_score +
-        weights['date_relevance_weight'] * date_relevance_score
+        weights.get('similarity_weight', 0.5) * similarity_score +
+        weights.get('entity_match_weight', 0.3) * entity_match_score +
+        weights.get('date_relevance_weight', 0.2) * date_relevance_score
     )
     return final_score

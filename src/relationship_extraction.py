@@ -21,7 +21,8 @@ def extract_relationships(df):
         
         relationships.append({'syntactic': deps, 'custom': custom_rels})
     
-    df['relationships'] = relationships
+    # Use .loc for assignment
+    df.loc[:, 'relationships'] = relationships
     return df
 
 def extract_custom_relationships(entities):

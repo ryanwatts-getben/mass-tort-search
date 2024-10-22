@@ -7,20 +7,24 @@ from preprocessing import preprocess_data
 from entity_extraction import extract_entities
 from relationship_extraction import extract_relationships
 from vectorization import vectorize_documents
-from pinecone_operations import upload_to_pinecone, search_pinecone
+from pinecone_operations import upload_to_pinecone, search_pinecone, index_name
 from scoring import score_and_rank_results
-from utils import load_search_criteria, generate_report
-import logging
+from utils import load_search_criteria, generate_report, load_config, setup_logging
+from datasets import Dataset
+from torch.utils.data import DataLoader
 import pandas as pd
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Enable Copy-on-Write
+pd.options.mode.copy_on_write = True
 
-# Load environment variables and initialize clients
-load_dotenv()
-AWS_REGION = os.getenv('AWS_REGION')
-AWS_BUCKET_NAME = os.getenv('AWS_LOVELY_BUCKET')
+# Set up logging
+logger = setup_logging()
+
+# Load configuration
+config = load_config('config/config.yaml')
+AWS_REGION = config['aws']['region']
+AWS_BUCKET_NAME = config['aws']['s3']['bucket']
+AWS_PREFIXES = config['aws']['s3'].get('prefixes', [])
 AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
 AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 print(AWS_BUCKET_NAME)
@@ -34,41 +38,47 @@ s3 = boto3.client('s3',
 PINECONE_API_KEY = os.getenv('PINECONE_API_KEY')
 PINECONE_ENVIRONMENT = os.getenv('PINECONE_ENVIRONMENT')
 pc = Pinecone(api_key=PINECONE_API_KEY, environment=PINECONE_ENVIRONMENT)
+index_name = config['pinecone']['index_name']
+
+def process_batch(batch):
+    # Preprocessing
+    batch = preprocess_data(batch)
+    
+    # Entity Extraction
+    batch = extract_entities(batch)
+    
+    # Relationship Extraction
+    batch = extract_relationships(batch)
+    
+    # Vectorization
+    batch = vectorize_documents(batch)
+    
+    return batch
 
 def main():
     try:
         # 1. Data Ingestion
         logger.info("Starting data ingestion from S3")
-        raw_data = ingest_data_from_s3(s3, AWS_BUCKET_NAME, '1225')
+        raw_data = ingest_data_from_s3(s3, AWS_BUCKET_NAME)
         
-        if not raw_data:
-            logger.warning("No data was ingested from S3. Exiting process.")
+        if raw_data.empty:
+            logger.error("No data retrieved from S3. Exiting pipeline.")
             return
         
-        # 2. Preprocessing
-        preprocessed_data = preprocess_data(raw_data)
+        # Process data in batches
+        batch_size = 32  # Adjust this based on your memory constraints
+        for i in range(0, len(raw_data), batch_size):
+            batch = raw_data[i:i+batch_size]
+            processed_batch = process_batch(batch)
+            
+            # Upload to Pinecone
+            upload_to_pinecone(processed_batch, index_name)
         
-        if preprocessed_data.empty:
-            logger.warning("No data remained after preprocessing. Exiting process.")
-            return
+        # 6. Search and Score
+        search_criteria = load_search_criteria(config)
+        search_results = search_pinecone(search_criteria, index_name)
         
-        # 3. Entity Extraction
-        preprocessed_data = extract_entities(preprocessed_data)
-        
-        # 4. Relationship Extraction
-        preprocessed_data = extract_relationships(preprocessed_data)
-        
-        # 5. Vectorization
-        preprocessed_data = vectorize_documents(preprocessed_data)
-        
-        # 6. Upload to Pinecone
-        upload_to_pinecone(preprocessed_data)
-        
-        # 7. Search and Score
-        search_criteria = load_search_criteria()
-        search_results = search_pinecone(search_criteria)
-        
-        # 8. Rank and Report
+        # 7. Rank and Report
         final_results = score_and_rank_results(search_results)
         generate_report(final_results)
 

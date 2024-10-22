@@ -3,11 +3,15 @@ aws:
   region: us-east-1
   s3:
     bucket: lovely-docs-2024-aba1a952-0384-45a3-87db-73f525b62b92
-    prefix: medical-records/
+    prefixes:
+      - "1225"
+      - "26192"
+      - "279534"
+      - "279451"
 
 # Pinecone Configuration
 pinecone:
-  index_name: medical-records
+  index_name: medical-records15
   dimension: 768  # BioBERT dimension
 
 # Data Processing
@@ -218,3 +222,15 @@ parameters:
   min_occurrence: 2      # Minimum occurrences of a symptom
   severity_threshold: 0.6 # Minimum severity score to consider
   confidence_interval: 0.95 # Required confidence level for scoring
+
+# Scoring weights
+scoring:
+  similarity_weight: 0.5
+  entity_match_weight: 0.3
+  date_relevance_weight: 0.2
+
+# Metadata Configuration
+metadata:
+  text_limit: 100  # Limit for 'text' field in characters
+  entity_limit: 5  # Limit for number of entities per type
+  max_size: 40000  # Maximum metadata size in bytes (40KB)

@@ -4,6 +4,8 @@ from functools import wraps
 import time
 import itertools
 
+logger = logging.getLogger(__name__)
+
 def load_config(config_path):
     """Load configuration from YAML file."""
     with open(config_path, 'r') as file:
@@ -65,7 +67,7 @@ def batch_generator(iterable, batch_size):
             break
         yield batch
 
-def load_search_criteria():
+def load_search_criteria(config):
     """Load search criteria from config.yaml."""
     import yaml
     with open('config/config.yaml', 'r') as file:
@@ -86,20 +88,54 @@ def get_s3_txt_files(s3_client, bucket, prefix):
     response = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix)
     return [obj['Key'] for obj in response.get('Contents', []) if obj['Key'].endswith('.txt')]
 
-
 def extract_case_and_document_id(key):
     try:
-        # Remove '_full.txt' suffix
-        key_without_suffix = key.replace('_full.txt', '')
         # Split the key by '/'
-        key_parts = key_without_suffix.split('/')
+        key_parts = key.split('/')
         if len(key_parts) >= 2:
-            case_id = key_parts[-2]  # <directory>
-            document_id = key_parts[-1]  # <filename>
+            case_id = key_parts[-2]  # <case_id>
+            file_name = key_parts[-1]  # <document_id>_full.txt or <document_id>_page<n>.txt
+            
+            # Extract document_id and page_number
+            if '_full.txt' in file_name:
+                document_id = file_name.replace('_full.txt', '')
+                page_number = 'FULL'
+            elif '_page' in file_name:
+                document_id, page_info = file_name.split('_page')
+                page_number = page_info.replace('.txt', '')
+            else:
+                document_id = file_name.replace('.txt', '')
+                page_number = 'UNKNOWN'
+            
+            return case_id, document_id, page_number
         else:
-            case_id = 'unknown_case_id'
-            document_id = key_parts[-1]
-        return case_id, document_id
+            logger.error(f"Unexpected key format: {key}")
+            return 'unknown_case_id', 'unknown_document_id', 'UNKNOWN'
     except Exception as e:
-        logger.error(f"Error extracting case_id and document_id from key {key}: {e}")
-        return 'unknown_case_id', 'unknown_document_id'
+        logger.error(f"Error extracting case_id, document_id, and page_number from key {key}: {e}")
+        return 'unknown_case_id', 'unknown_document_id', 'UNKNOWN'
+
+def get_s3_txt_files_in_folders(s3_client, bucket, prefixes):
+    """Get list of .txt files from the S3 bucket that are inside specified folders."""
+    try:
+        paginator = s3_client.get_paginator('list_objects_v2')
+        txt_files = []
+        for prefix in prefixes:
+            response_iterator = paginator.paginate(Bucket=bucket, Prefix=prefix)
+            for page in response_iterator:
+                for obj in page.get('Contents', []):
+                    key = obj['Key']
+                    if key.endswith('.txt'):
+                        txt_files.append(key)
+        return txt_files
+    except Exception as e:
+        logger.error(f"Error in get_s3_txt_files_in_folders: {str(e)}")
+        return []
+
+def ensure_consistent_dataframe(df):
+    """Ensure that the DataFrame has a consistent structure."""
+    required_columns = ['case_id', 'document_id', 'cleaned_text', 'entities']
+    for col in required_columns:
+        if col not in df.columns:
+            df[col] = None
+    return df

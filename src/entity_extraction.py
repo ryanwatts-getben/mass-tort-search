@@ -21,79 +21,44 @@ ner_pipeline = pipeline(
 def extract_entities_from_text(text):
     """Extract entities from a single text string."""
     max_length = 512
-
-    entities = {
-        'icd10_codes': [],
-        'symptoms': [],
-        'lab_results': [],
-        'other_conditions': [],
-        'diagnostic_procedures': [],
-        'treatment_options': [],
-        'complications': []
-    }
+    entities = {}
 
     # Split text into smaller chunks
-    sentences = text.split('. ')
-    current_chunk = ''
+    chunks = [text[i:i+max_length] for i in range(0, len(text), max_length)]
     
-    for sentence in sentences:
-        temp_chunk = current_chunk + sentence + '. '
-        tokenized = ner_tokenizer(temp_chunk, return_tensors='pt')
-        
-        if tokenized.input_ids.shape[1] <= max_length:
-            current_chunk = temp_chunk
-        else:
-            ner_results = ner_pipeline(current_chunk)
-            for entity in ner_results:
-                ent_text = entity['word']
-                ent_label = entity['entity_group']
-                
-                if ent_label in entities:
-                    entities[ent_label].append(ent_text)
-            
-            current_chunk = sentence + '. '
-
-    # Process remaining text
-    if current_chunk:
-        ner_results = ner_pipeline(current_chunk)
+    all_ner_results = []
+    for chunk in chunks:
+        ner_results = ner_pipeline(chunk)
+        all_ner_results.extend(ner_results)
         for entity in ner_results:
             ent_text = entity['word']
             ent_label = entity['entity_group']
             
-            if ent_label in entities:
-                entities[ent_label].append(ent_text)
+            if ent_label not in entities:
+                entities[ent_label] = []
+            entities[ent_label].append(ent_text)
 
     # Remove duplicates
     for key in entities:
         entities[key] = list(set(entities[key]))
 
+    logger.info(f"Extracted entities: {entities}")
+    logger.debug(f"Full NER results: {all_ner_results}")
+
     return entities
 
-def extract_entities(df):
-    """Process the entire DataFrame and extract entities from each row."""
-    # Create a list to store entities for each row
+def extract_entities(batch):
+    """Process the entire batch and extract entities from each row."""
     all_entities = []
     
-    # Process each row in the DataFrame
-    for _, row in df.iterrows():
+    for _, row in batch.iterrows():
         try:
-            # Extract entities from cleaned_text
             entities = extract_entities_from_text(row['cleaned_text'])
             all_entities.append(entities)
+            logger.info(f"Extracted entities for document {row.get('document_id', 'unknown')}: {entities}")
         except Exception as e:
             logger.error(f"Error processing row: {e}")
-            # Add empty entities if processing fails
-            all_entities.append({
-                'icd10_codes': [],
-                'symptoms': [],
-                'lab_results': [],
-                'other_conditions': [],
-                'diagnostic_procedures': [],
-                'treatment_options': [],
-                'complications': []
-            })
+            all_entities.append({})
     
-    # Add the entities to the DataFrame
-    df['entities'] = all_entities
-    
-    return df
+    batch['entities'] = all_entities
+    return batch
