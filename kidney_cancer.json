@@ -1,0 +1,66 @@
+{
+    "KidneyCancer": [
+      {
+        "ICD10CMcodes": ["C64.1", "C64.2", "C64.9"],
+        "Symptoms": [
+          {"Blood in urine (hematuria)": ["R31.0", "R31.1", "R31.21", "R31.29"]},
+          {"Low back pain on one side": ["M54.5", "M54.40", "R52"]},
+          {"Mass or lump in abdomen/side": ["R22.2", "R19.00", "R19.01", "R19.02"]},
+          {"Unexplained weight loss": ["R63.4", "R63.5"]},
+          {"Fatigue": ["R53.83", "G93.3", "F48.0"]},
+          {"Fever": ["R50.9", "R50.2", "R50.81", "R50.82", "R50.83"]},
+          {"Loss of appetite": ["R63.0"]},
+          {"Anemia": ["D64.9", "D63.1"]},
+          {"Swelling in legs and ankles": ["R60.0", "R60.1"]},
+          {"High blood pressure": ["R20.0", "R20.2","I10", "I15.9"]}
+        ],
+        "LabResultsRedFlags": [
+          {"Elevated creatinine": ["R79.89", "N18.1", "N18.2", "N18.3", "N18.4", "N18.5"]},
+          {"Anemia": ["D64.9", "D63.1", "D50.0", "D51.0", "D52.0", "D53.9"]},
+          {"Abnormal urinalysis": ["R82.90", "R82.91", "R82.99", "R80.0", "R80.1", "R80.2", "R80.3", "R80.8", "R80.9"]},
+          {"Elevated calcium levels": ["R79.0", "E83.52"]},
+          {"Elevated liver enzymes": ["R74.0", "R74.8"]},
+          {"Elevated erythrocyte sedimentation rate": ["R70.0"]},
+          {"Elevated C-reactive protein": ["R79.82"]}
+        ],
+        "OtherThingsToLookFor": [
+          {"History of smoking": ["Z87.891", "F17.210", "F17.200", "Z72.0"]},
+          {"Family history of kidney cancer": ["Z80.51", "Z80.59"]},
+          {"Von Hippel-Lindau disease": ["Q85.8", "D49.7"]},
+          {"Obesity": ["E66.9", "E66.01", "E66.09", "Z68.30", "Z68.31", "Z68.32", "Z68.33", "Z68.34", "Z68.35"]},
+          {"Hypertension": ["I10", "I11.0", "I11.9", "I12.0", "I12.9", "I13.0", "I13.10", "I13.11", "I13.2"]},
+          {"Chronic kidney disease": ["N18.1", "N18.2", "N18.3", "N18.4", "N18.5", "N18.6"]},
+          {"Tuberous sclerosis": ["Q85.1"]},
+          {"Exposure to certain chemicals": ["Z57.4", "Z57.5", "Z57.8"]},
+          {"Dialysis treatment": ["Z99.2"]}
+        ],
+        "DiagnosticProcedures": [
+          {"CT scan of abdomen and pelvis": ["74176", "74177", "74178"]},
+          {"MRI of abdomen": ["74181", "74182", "74183"]},
+          {"Ultrasound of kidneys": ["76770", "76775"]},
+          {"Renal angiography": ["75726"]},
+          {"Renal biopsy": ["50200", "50205"]},
+          {"Chest X-ray": ["71045", "71046"]},
+          {"Bone scan": ["78300", "78305", "78306"]}
+        ],
+        "TreatmentOptions": [
+          {"Partial nephrectomy": ["50240", "50543"]},
+          {"Radical nephrectomy": ["50220", "50545"]},
+          {"Ablation therapy": ["50592", "50593"]},
+          {"Targeted therapy": ["Z51.81"]},
+          {"Immunotherapy": ["Z51.12"]},
+          {"Radiation therapy": ["Z51.0"]},
+          {"Active surveillance": ["Z08"]}
+        ],
+        "Complications": [
+          {"Metastasis": ["C77.0", "C77.1", "C77.2", "C77.3", "C77.4", "C77.5", "C78.0", "C78.7"]},
+          {"Chronic kidney disease": ["N18.1", "N18.2", "N18.3", "N18.4", "N18.5", "N18.6"]},
+          {"Paraneoplastic syndromes": ["D49.9"]},
+          {"Venous thromboembolism": ["I82.91"]},
+          {"Hypercalcemia": ["E83.52"]},
+          {"Secondary hypertension": ["I15.9"]},
+          {"Anemia": ["D64.9"]}
+        ]
+      }
+    ]
+  }

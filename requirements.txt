@@ -2,5 +2,11 @@ boto3
 tqdm
 python-dotenv
 pinecone-client
-openai
-httpx
+transformers
+torch
+pandas
+nltk
+spacy
+yake
+pyyaml
+numpy
