@@ -1,10 +1,17 @@
-from pinecone import Pinecone, ServerlessSpec, PineconeException
+from pinecone.grpc import PineconeGRPC as Pinecone
 import os
 from dotenv import load_dotenv
 from transformers import AutoTokenizer, AutoModel
 import torch
 import logging
 from utils import load_config, setup_logging
+from datasets import Dataset
+from typing import Dict, List, Any
+from tqdm import tqdm
+import numpy as np
+import sys
+import json
+
 
 # Set up logging
 logger = setup_logging()
@@ -13,168 +20,202 @@ logger = setup_logging()
 config = load_config('config/config.yaml')
 model_config = config.get('models', {})
 bert_model_name = model_config.get('bert', "medicalai/ClinicalBERT")
+metadata_config = config.get('metadata', {})
+MAX_MESSAGE_SIZE = config.get('pinecone', {}).get('grpc', {}).get('max_message_length', 4194304)  # 4MB default
 
 # Load environment variables
 load_dotenv()
 PINECONE_API_KEY = os.getenv('PINECONE_API_KEY')
 PINECONE_ENVIRONMENT = os.getenv('PINECONE_ENVIRONMENT')
-PINECONE_CLOUD = os.getenv('PINECONE_CLOUD', 'aws')  # Default to 'aws' if not specified
-PINECONE_REGION = os.getenv('PINECONE_REGION', 'us-east-1')  # Default to 'us-east-1' if not specified
+index_name = config.get('pinecone', {}).get('index_name', 'medical-records4')
 
-# Initialize the Pinecone client
+# Initialize the Pinecone client with GRPC
 pc = Pinecone(api_key=PINECONE_API_KEY)
 
-# Load pre-trained ClinicalBERT model
-tokenizer = AutoTokenizer.from_pretrained(bert_model_name)
-model = AutoModel.from_pretrained(bert_model_name)
-index_name = config.get('pinecone', {}).get('index_name', 'medical-records4')
-MAX_METADATA_SIZE = config.get('metadata', {}).get('max_size', 40000)
-
-def ensure_index_exists(index_name):
-    """
-    Ensure that the Pinecone index exists, creating it if necessary.
-    """
+def validate_dataset(dataset: Dataset) -> bool:
+    """Validate that dataset contains all required fields."""
     try:
-        existing_indexes = pc.list_indexes()
-        if index_name not in existing_indexes:
-            logger.info(f"Creating new index: {index_name}")
-            pc.create_index(
-                name=index_name,
-                dimension=768,  # ClinicalBERT dimension
-                metric="cosine",
-                spec=ServerlessSpec(
-                    cloud=PINECONE_CLOUD,
-                    region=PINECONE_REGION
-                )
-            )
-            logger.info(f"Index {index_name} created successfully.")
-        else:
-            logger.info(f"Index {index_name} already exists.")
-    except PineconeException as e:
-        if "already exists" in str(e):
-            logger.info(f"Index {index_name} already exists. Proceeding with existing index.")
-        else:
-            logger.error(f"Error ensuring index exists: {str(e)}")
-            raise
-    except Exception as e:
-        logger.error(f"Unexpected error ensuring index exists: {str(e)}")
-        raise
-
-def upload_to_pinecone(processed_data, index_name):
-    """
-    Upload vectors and metadata to Pinecone index.
-    """
-    try:
-        # Ensure the index exists before processing batches
-        ensure_index_exists(index_name)
+        required_fields = ['vector', 'cleaned_text', 'case_id', 'document_id', 'page_number']
+        missing_fields = [field for field in required_fields if field not in dataset.features]
         
-        index = pc.Index(index_name)
-        
-        # Process in batches
-        batch_size = 100
-        for i in range(0, len(processed_data), batch_size):
-            batch = processed_data[i:i+batch_size]
-            vectors = []
+        if missing_fields:
+            logger.error(f"Missing required fields in dataset: {missing_fields}")
+            return False
             
-            for _, row in batch.iterrows():
-                # Ensure metadata size is within limits
-                metadata = row['metadata']
-                metadata_size = sum(len(str(v)) for v in metadata.values())
-                if metadata_size > MAX_METADATA_SIZE:
-                    logger.warning(f"Metadata size exceeds {MAX_METADATA_SIZE} bytes for vector {row.name}. Truncating metadata.")
-                    # Truncate metadata
-                    while metadata_size > MAX_METADATA_SIZE:
-                        for key in list(metadata.keys()):
-                            if key in ['PROBLEM', 'TEST', 'TREATMENT', 'DRUG', 'ANATOMY']:
-                                if len(metadata[key]) > 1:
-                                    metadata[key] = metadata[key][:-1]
-                                else:
-                                    del metadata[key]
-                            elif isinstance(metadata[key], str):
-                                metadata[key] = metadata[key][:len(metadata[key])//2]
-                        metadata_size = sum(len(str(v)) for v in metadata.values())
+        # Validate vector dimension
+        if 'vector' in dataset.features:
+            sample_vector = dataset[0]['vector']
+            if not isinstance(sample_vector, list) or len(sample_vector) != 768:
+                logger.error(f"Invalid vector dimension: {len(sample_vector) if isinstance(sample_vector, list) else type(sample_vector)}")
+                return False
                 
+        return True
+    except Exception as e:
+        logger.error(f"Error validating dataset: {str(e)}")
+        return False
+
+def prepare_vectors(examples: Dict[str, List[Any]], batch_start_idx: int = 0) -> List[Dict]:
+    """Prepare vectors for Pinecone upload, using pre-prepared metadata."""
+    try:
+        vectors = []
+        for i in range(len(examples['vector'])):
+            try:
+                # Validate vector
+                vector = examples['vector'][i]
+                if not isinstance(vector, list) or len(vector) != 768:
+                    logger.warning(f"Invalid vector at index {i}: Expected list of length 768.")
+                    continue
+
+                # Check if vector is all zeros
+                if all(v == 0.0 for v in vector):
+                    logger.warning(f"Zero vector at index {i}, indicating potential issues in vectorization.")
+                    continue  # Skip zero vectors
+
+                # Use prepared metadata
+                metadata = examples['metadata'][i]
+
+                # Create vector data
                 vector_data = {
-                    'id': str(row.name),  # Use the index as the ID
-                    'values': row['vector'].tolist(),
+                    'id': f"{metadata['case_id']}_{metadata['document_id']}_{metadata['page_number']}_{batch_start_idx + i}",
+                    'values': vector,
                     'metadata': metadata
                 }
                 vectors.append(vector_data)
-            
-            logger.info(f"Upserting batch of {len(vectors)} vectors")
-            try:
-                index.upsert(vectors=vectors)
+
             except Exception as e:
-                logger.error(f"Error upserting batch: {str(e)}")
-                # Log the problematic vectors
-                for vector in vectors:
-                    logger.error(f"Problematic vector: {vector}")
-                raise
-            
+                logger.error(f"Error processing vector {i}: {str(e)}")
+                continue
+
+        return vectors
+
+    except Exception as e:
+        logger.error(f"Error preparing vectors: {str(e)}")
+        return []
+
+def upload_to_pinecone(dataset: Dataset, index_name: str):
+    """Upload vectors to Pinecone, adjusting batch size to prevent message size exceeding limit."""
+    try:
+        # Validate dataset
+        if not validate_dataset(dataset):
+            raise ValueError("Invalid dataset structure")
+
+        # Get index
+        index = pc.Index(index_name)
+
+        # Start with initial batch size
+        batch_size = 100  # Start with 100 and adjust if necessary
+        total_uploaded = 0
+
+        # Use tqdm for progress tracking
+        with tqdm(total=len(dataset), desc="Uploading to Pinecone") as pbar:
+            i = 0
+            while i < len(dataset):
+                try:
+                    # Get batch
+                    end_idx = min(i + batch_size, len(dataset))
+                    batch = dataset.select(range(i, end_idx))
+
+                    # Prepare vectors
+                    vectors = prepare_vectors(batch, batch_start_idx=i)
+
+                    if vectors:
+                        # Check message size
+                        message_size = sys.getsizeof(json.dumps([v['metadata'] for v in vectors]))
+                        if message_size > MAX_MESSAGE_SIZE:
+                            # Reduce batch size
+                            logger.warning(f"Batch size {batch_size} too large with message size {message_size} bytes, reducing batch size")
+                            batch_size = max(1, batch_size // 2)
+                            continue  # Retry with smaller batch size
+
+                        # Upsert following Pinecone format
+                        response = index.upsert(
+                            vectors=vectors,
+                            namespace="default"
+                        )
+
+                        # Update progress
+                        uploaded_count = len(vectors)  # We know how many we sent
+                        total_uploaded += uploaded_count
+                        pbar.update(uploaded_count)
+
+                        logger.debug(f"Batch {i//batch_size + 1}: Uploaded {uploaded_count} vectors")
+
+                        # Increase batch size slowly to improve performance
+                        batch_size = min(batch_size + 10, 100)  # Don't exceed 100 as per recommendations
+
+                    i += len(batch)  # Move to next batch
+
+                except Exception as e:
+                    logger.error(f"Error uploading batch starting at index {i}: {str(e)}")
+                    if batch_size > 1:
+                        # Reduce batch size and retry
+                        batch_size = max(1, batch_size // 2)
+                        logger.warning(f"Reducing batch size to {batch_size} and retrying")
+                    else:
+                        # Skip this vector if batch size is 1 and still failing
+                        i += 1
+                        pbar.update(1)
+                        logger.error(f"Skipping vector at index {i} due to error")
+                    continue
+
+        logger.info(f"Successfully uploaded {total_uploaded} vectors to Pinecone")
+
     except Exception as e:
         logger.error(f"Error in upload_to_pinecone: {str(e)}")
         raise
 
-def vectorize_search_criteria(criteria):
-    """
-    Vectorize the search criteria using ClinicalBERT.
-    """
-    try:
-        # Combine criteria into a single text
-        combined_text = ' '.join([f"{key}: {value}" for key, value in criteria.items()])
-        
-        # Tokenize and get BERT embeddings
-        inputs = tokenizer(combined_text, return_tensors="pt", truncation=True, max_length=512)
-        with torch.no_grad():
-            outputs = model(**inputs)
-        
-        # Use the [CLS] token embedding as the vector
-        vector = outputs.last_hidden_state[0][0].numpy()
-        return vector.tolist()
-        
-    except Exception as e:
-        logger.error(f"Error in vectorize_search_criteria: {str(e)}")
-        raise
-
-def search_pinecone(search_criteria, index_name):
-    """
-    Search Pinecone index with the given criteria.
-    """
+def search_pinecone(search_criteria: Dict, index_name: str) -> Dict:
+    """Search Pinecone index using GRPC client."""
     try:
         index = pc.Index(index_name)
         
-        # Convert search criteria to vector (use the same vectorization process as documents)
+        # Convert search criteria to vector
         search_vector = vectorize_search_criteria(search_criteria)
         
-        results = index.query(vector=search_vector, top_k=100, include_metadata=True)
-        return {'matches': results['matches']}
+        # Query index
+        results = index.query(
+            vector=search_vector,
+            top_k=100,
+            include_metadata=True,
+            namespace="default"
+        )
+        
+        return {'matches': results.matches}
         
     except Exception as e:
         logger.error(f"Error in search_pinecone: {str(e)}")
         raise
 
-def delete_from_pinecone(document_ids, index_name):
-    """
-    Delete specific documents from Pinecone index.
-    """
+def vectorize_search_criteria(criteria: Dict) -> List[float]:
+    """Vectorize search criteria."""
+    try:
+        # Initialize tokenizer and model if not already done
+        tokenizer = AutoTokenizer.from_pretrained(bert_model_name)
+        model = AutoModel.from_pretrained(bert_model_name)
+        
+        # Combine criteria into text
+        text = ' '.join(f"{k}: {v}" for k, v in criteria.items())
+        
+        # Tokenize and get embeddings
+        inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+        with torch.no_grad():
+            outputs = model(**inputs)
+            vector = outputs.last_hidden_state[0][0].numpy().tolist()
+        
+        return vector
+        
+    except Exception as e:
+        logger.error(f"Error vectorizing search criteria: {str(e)}")
+        raise
+
+def delete_from_pinecone(document_ids: List[str], index_name: str):
+    """Delete vectors from Pinecone using GRPC client."""
     try:
         index = pc.Index(index_name)
         index.delete(ids=document_ids)
-        logger.info(f"Successfully deleted {len(document_ids)} documents from Pinecone")
+        logger.info(f"Successfully deleted {len(document_ids)} vectors")
         
     except Exception as e:
         logger.error(f"Error in delete_from_pinecone: {str(e)}")
         raise
 
-def get_document_by_id(document_id, index_name):
-    """
-    Retrieve a specific document from Pinecone by its ID.
-    """
-    try:
-        index = pc.Index(index_name)
-        result = index.fetch(ids=[document_id])
-        return result.vectors.get(document_id)
-        
-    except Exception as e:
-        logger.error(f"Error in get_document_by_id: {str(e)}")
-        raise

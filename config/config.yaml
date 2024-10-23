@@ -6,13 +6,33 @@ aws:
     prefixes:
       - "1225"
       - "26192"
-#      - "279534"
-#      - "279451"
+      - "279534"
+      - "279451"
+      - "281123"
+      - "1229"
+      - "1231"
+      - "1237"
+      - "1354"
+      - "1470"
+      - "21646"
+      - "22654"
+      - "23664"
+      - "28527"
+      - "2870"
+      - "2871"
+      - "2873"
+      - "2874"
+      - "2880"
 
 # Pinecone Configuration
 pinecone:
-  index_name: medical-records18
+  index_name: medical-records20
   dimension: 768  # BioBERT dimension
+  batch_size: 100  # Recommended batch size for GRPC
+  grpc:
+    enabled: true
+    timeout: 20.0  # Timeout in seconds
+    max_message_length: 4194304  # 4MB max message size
 
 # Data Processing
 data_processing:
@@ -236,3 +256,4 @@ metadata:
   entity_limit: 5  # Limit for number of entities per type
   max_size: 39000  # Maximum metadata size in bytes (40KB)
   MAX_METADATA_SIZE: 40000  # Maximum metadata size in bytes (40KB)
+

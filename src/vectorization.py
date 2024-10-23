@@ -1,7 +1,9 @@
 from transformers import AutoTokenizer, AutoModel
 import torch
-from utils import ensure_consistent_dataframe, load_config
+from utils import load_config
 import logging
+from datasets import Dataset
+from typing import Dict, List, Any
 
 logger = logging.getLogger(__name__)
 
@@ -10,57 +12,111 @@ config = load_config('config/config.yaml')
 model_config = config.get('models', {})
 bert_model_name = model_config.get('bert', "medicalai/ClinicalBERT")
 
-# Load pre-trained ClinicalBERT model
+# Initialize tokenizer
 tokenizer = AutoTokenizer.from_pretrained(bert_model_name)
-model = AutoModel.from_pretrained(bert_model_name)
 
-# Load configuration
-metadata_config = config.get('metadata', {})
-TEXT_LIMIT = metadata_config.get('text_limit', 100)
-ENTITY_LIMIT = metadata_config.get('entity_limit', 5)
+def initialize_vectorization_model(device):
+    """Initialize a separate model for vectorization."""
+    try:
+        model = AutoModel.from_pretrained(bert_model_name)
+        model.to(device)
+        model.eval()
+        logger.info(f"Initialized vectorization model {bert_model_name} on {device}")
+        return model
+    except Exception as e:
+        logger.error(f"Error initializing vectorization model: {str(e)}")
+        raise
 
-def vectorize_documents(df):
-    df = ensure_consistent_dataframe(df)
-    vectors = []
-    metadata_list = []
-    
-    for _, row in df.iterrows():
-        # Get all entity types as extracted by ClinicalBERT
-        entities = row['entities'] if isinstance(row['entities'], dict) else {}
-        
-        # Combine text and all entities for embedding
-        combined_text = f"{row['cleaned_text']} {' '.join([' '.join(entities.get(key, [])) for key in entities])}"
-        
-        # Tokenize and get embeddings
-        inputs = tokenizer(combined_text, return_tensors="pt", truncation=True, max_length=512)
-        with torch.no_grad():
-            outputs = model(**inputs)
-        
-        # Use [CLS] token embedding
-        vector = outputs.last_hidden_state[0][0].numpy()
-        
-        # Create metadata with dynamically extracted entity types
-        metadata = {
-            'text': row['cleaned_text'][:TEXT_LIMIT],
-            'case_id': row['case_id'],
-            'document_id': row['document_id'],
-            'page_number': row['page_number'],
-        }
-        for entity_type, entity_list in entities.items():
-            metadata[entity_type] = entity_list[:ENTITY_LIMIT]
-        
-        vectors.append(vector)
-        metadata_list.append(metadata)
-    
-    # Use .loc for assignments
-    df.loc[:, 'vector'] = vectors
-    df.loc[:, 'metadata'] = metadata_list
-    
-    # Log any rows with unknown case_id or document_id
-    unknown_rows = df[df['metadata'].apply(lambda x: x['case_id'] == 'unknown_case_id' or x['document_id'] == 'unknown_document_id')]
-    if not unknown_rows.empty:
-        logger.warning(f"Found {len(unknown_rows)} rows with unknown case_id or document_id")
-        for _, row in unknown_rows.iterrows():
-            logger.warning(f"Row index: {row.name}, case_id: {row['metadata']['case_id']}, document_id: {row['metadata']['document_id']}, page_number: {row['metadata']['page_number']}")
-    
-    return df
+def vectorize_dataset(dataset: Dataset, model) -> Dataset:
+    """Vectorize documents in a dataset using efficient batching."""
+    try:
+        device = next(model.parameters()).device
+
+        def process_batch(examples: Dict[str, List[Any]]) -> Dict[str, List[Any]]:
+            try:
+                # Ensure we're using cleaned_text
+                if 'cleaned_text' not in examples:
+                    logger.error("Missing cleaned_text in examples")
+                    raise ValueError("Dataset must contain cleaned_text field")
+
+                # Combine text and entities
+                combined_texts = []
+                for idx, (text, entities) in enumerate(zip(examples['cleaned_text'], examples.get('entities', [{}] * len(examples['cleaned_text'])))):
+                    try:
+                        # Ensure text is a string
+                        text = str(text) if text is not None else ""
+                        
+                        # Handle entities
+                        if isinstance(entities, dict):
+                            entity_strings = []
+                            for ent_list in entities.values():
+                                if isinstance(ent_list, list):
+                                    entity_strings.extend(str(e) for e in ent_list)
+                            entity_text = ' '.join(entity_strings)
+                        else:
+                            entity_text = ''
+                        
+                        combined_text = f"{text} {entity_text}".strip()
+                        combined_texts.append(combined_text)
+
+                        # Log the text being vectorized
+                        logger.debug(f"Index {idx}: Combined text for vectorization: {combined_text[:100]}")
+
+                    except Exception as e:
+                        logger.error(f"Error combining text and entities at index {idx}: {str(e)}")
+                        combined_texts.append("")
+
+                # Tokenize with error handling
+                try:
+                    inputs = tokenizer(
+                        combined_texts,
+                        padding=True,
+                        truncation=True,
+                        max_length=512,
+                        return_tensors="pt"
+                    ).to(device)
+                except Exception as e:
+                    logger.error(f"Error in tokenization: {str(e)}")
+                    raise
+
+                # Get embeddings
+                try:
+                    with torch.no_grad():
+                        outputs = model(**inputs)
+                        vectors = outputs.last_hidden_state[:, 0, :].cpu().numpy()
+                        logger.debug(f"Generated vectors with shape: {vectors.shape}")
+                except Exception as e:
+                    logger.error(f"Error in model inference: {str(e)}")
+                    raise
+
+                # Validate vectors
+                if vectors is None or len(vectors) == 0:
+                    logger.error("No vectors generated in current batch.")
+                    raise ValueError("Vectors are empty.")
+
+                return {
+                    **examples,
+                    'vector': vectors.tolist()
+                }
+            except Exception as e:
+                logger.error(f"Error in batch processing: {str(e)}")
+                # Return empty vectors as fallback
+                zero_vectors = [[0.0] * 768 for _ in range(len(examples['cleaned_text']))]
+                return {
+                    **examples,
+                    'vector': zero_vectors
+                }
+
+        # Process dataset in batches
+        vectorized_dataset = dataset.map(
+            process_batch,
+            batched=True,
+            batch_size=32,
+            desc="Vectorizing documents"
+        )
+
+        return vectorized_dataset
+
+    except Exception as e:
+        logger.error(f"Error in vectorization: {str(e)}")
+        raise

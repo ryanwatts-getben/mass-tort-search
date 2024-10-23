@@ -2,6 +2,8 @@ from transformers import AutoTokenizer, AutoModelForTokenClassification, pipelin
 import torch
 import logging
 from utils import load_config
+from datasets import Dataset
+from typing import Dict, List, Any
 
 logger = logging.getLogger(__name__)
 
@@ -14,57 +16,89 @@ ner_model_name = model_config.get('ner', "samrawal/bert-base-uncased_clinical-ne
 ner_tokenizer = AutoTokenizer.from_pretrained(ner_model_name)
 ner_model = AutoModelForTokenClassification.from_pretrained(ner_model_name)
 
-# Initialize NER pipeline
-device = 0 if torch.cuda.is_available() else -1
-ner_pipeline = pipeline(
-    "ner",
-    model=ner_model,
-    tokenizer=ner_tokenizer,
-    aggregation_strategy="simple",
-    device=device
-)
-
-def extract_entities_from_text(text):
-    """Extract entities from a single text string."""
-    max_length = 512
-    entities = {}
-
-    # Split text into smaller chunks
-    chunks = [text[i:i+max_length] for i in range(0, len(text), max_length)]
-    
-    all_ner_results = []
-    for chunk in chunks:
-        ner_results = ner_pipeline(chunk)
-        all_ner_results.extend(ner_results)
-        for entity in ner_results:
-            ent_text = entity['word']
-            ent_label = entity['entity_group']
+def process_entities_batch(examples: Dict[str, List[Any]], pipeline) -> Dict[str, List[Any]]:
+    """Process a batch of examples through NER pipeline."""
+    try:
+        # Get device
+        device = next(pipeline.model.parameters()).device
+        
+        # Process texts through pipeline
+        # Note: NER pipeline handles its own tokenization and padding
+        # We only pass the texts and batch_size
+        ner_results = pipeline(
+            examples['cleaned_text'],
+            batch_size=32
+        )
+        
+        # Extract entities for each text
+        entities_list = []
+        for text_entities in ner_results:
+            entities = {}
+            for entity in text_entities:
+                ent_label = entity['entity_group']
+                ent_text = entity['word']
+                
+                if ent_label not in entities:
+                    entities[ent_label] = []
+                entities[ent_label].append(ent_text)
             
-            if ent_label not in entities:
-                entities[ent_label] = []
-            entities[ent_label].append(ent_text)
+            # Remove duplicates and sort
+            for key in entities:
+                entities[key] = sorted(list(set(entities[key])))
+            
+            # Convert all values to strings
+            string_entities = {k: [str(v) for v in vals] for k, vals in entities.items()}
+            entities_list.append(string_entities)
+        
+        # Add entities to examples
+        return {
+            **examples,
+            'entities': entities_list
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in batch entity processing: {str(e)}")
+        return {**examples, 'entities': [{} for _ in range(len(examples['cleaned_text']))]}
 
-    # Remove duplicates and sort
-    for key in entities:
-        entities[key] = sorted(list(set(entities[key])))
+def extract_entities(dataset: Dataset) -> Dataset:
+    """Extract entities using the pipeline's support for datasets for better GPU utilization."""
+    try:
+        # Initialize NER pipeline with correct parameters
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        ner_pipeline = pipeline(
+            task="ner",
+            model=ner_model,
+            tokenizer=ner_tokenizer,
+            aggregation_strategy="simple",
+            device=device,
+            framework="pt"
+        )
 
-    logger.info(f"Extracted entities: {entities}")
-    logger.debug(f"Full NER results: {all_ner_results}")
+        # Process dataset directly through pipeline without unsupported parameters
+        ner_results = ner_pipeline(dataset['cleaned_text'])
 
-    return entities
+        # Process results into entities
+        entities_list = []
+        for text_entities in ner_results:
+            entities = {}
+            for entity in text_entities:
+                ent_label = entity['entity_group']
+                ent_text = entity['word']
 
-def extract_entities(batch):
-    """Process the entire batch and extract entities from each row."""
-    all_entities = []
-    
-    for _, row in batch.iterrows():
-        try:
-            entities = extract_entities_from_text(row['cleaned_text'])
-            all_entities.append(entities)
-            logger.info(f"Extracted entities for document {row.get('document_id', 'unknown')}: {entities}")
-        except Exception as e:
-            logger.error(f"Error processing row: {e}")
-            all_entities.append({})
-    
-    batch['entities'] = all_entities
-    return batch
+                if ent_label not in entities:
+                    entities[ent_label] = []
+                entities[ent_label].append(ent_text)
+
+            # Remove duplicates and sort
+            for key in entities:
+                entities[key] = sorted(list(set(entities[key])))
+
+            entities_list.append(entities)
+
+        # Add entities to dataset
+        dataset = dataset.add_column('entities', entities_list)
+        return dataset
+
+    except Exception as e:
+        logger.error(f"Error in entity extraction: {str(e)}")
+        raise

@@ -1,58 +1,132 @@
 import spacy
 import logging
+from datasets import Dataset
+from typing import Dict, List, Any
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 # Load spaCy model
-nlp = spacy.load("en_core_web_sm")
+try:
+    nlp = spacy.load("en_core_web_sm")
+except Exception as e:
+    logger.error(f"Error loading spaCy model: {str(e)}")
+    raise
 
-def extract_relationships(df):
-    """Extract relationships from the DataFrame."""
-    relationships = []
-    
-    for _, row in df.iterrows():
-        doc = nlp(row['cleaned_text'])
+def extract_relationships(dataset: Dataset) -> Dataset:
+    """Extract relationships using dataset operations."""
+    try:
+        def process_batch(examples: Dict[str, List[Any]]) -> Dict[str, List[Any]]:
+            try:
+                relationships = []
+                
+                # Validate input data
+                if 'cleaned_text' not in examples:
+                    raise ValueError("Missing cleaned_text in examples")
+                if 'entities' not in examples:
+                    raise ValueError("Missing entities in examples")
+                
+                # Process each text in the batch
+                for text, entities in zip(examples['cleaned_text'], examples['entities']):
+                    try:
+                        # Validate text
+                        if not isinstance(text, str):
+                            logger.warning(f"Invalid text type: {type(text)}")
+                            text = str(text) if text is not None else ""
+                        
+                        # Extract syntactic dependencies
+                        doc = nlp(text[:1000000])  # Limit text length to prevent memory issues
+                        deps = [(token.text, token.dep_, token.head.text) for token in doc]
+                        
+                        # Extract custom relationships
+                        custom_rels = extract_custom_relationships(entities)
+                        
+                        relationships.append({
+                            'syntactic': deps,
+                            'custom': custom_rels
+                        })
+                    except Exception as e:
+                        logger.error(f"Error processing single text: {str(e)}")
+                        relationships.append({'syntactic': [], 'custom': []})
+                
+                # Ensure relationships list matches batch size
+                if len(relationships) != len(examples['cleaned_text']):
+                    logger.error("Mismatch in relationships list length")
+                    relationships.extend([{'syntactic': [], 'custom': []}] * 
+                                      (len(examples['cleaned_text']) - len(relationships)))
+                
+                return {**examples, 'relationships': relationships}
+                
+            except Exception as e:
+                logger.error(f"Error in process_batch: {str(e)}")
+                return {
+                    **examples,
+                    'relationships': [{'syntactic': [], 'custom': []}] * len(examples['cleaned_text'])
+                }
         
-        # Extract syntactic dependencies
-        deps = [(token.text, token.dep_, token.head.text) for token in doc]
+        # Process dataset in batches
+        processed_dataset = dataset.map(
+            process_batch,
+            batched=True,
+            batch_size=32,
+            desc="Extracting relationships",
+            num_proc=1  # SpaCy doesn't support multiprocessing well
+        )
         
-        # Extract custom relationships
-        custom_rels = extract_custom_relationships(row['entities'])
+        # Validate output dataset
+        if 'relationships' not in processed_dataset.column_names:
+            raise ValueError("Relationship extraction failed to produce relationships column")
         
-        relationships.append({'syntactic': deps, 'custom': custom_rels})
-    
-    # Use .loc for assignment
-    df.loc[:, 'relationships'] = relationships
-    return df
+        return processed_dataset
+        
+    except Exception as e:
+        logger.error(f"Error in relationship extraction: {str(e)}")
+        raise
 
-def extract_custom_relationships(entities):
+def extract_custom_relationships(entities: Dict) -> List[str]:
     """Extract custom relationships between entities."""
-    relationships = []
-    
-    # Get all entity values in a list
-    all_entities = []
-    for category, items in entities.items():
-        for item in items:
-            all_entities.append((category, item))
-    
-    # Create relationships between entities
-    for i, (cat1, ent1) in enumerate(all_entities):
-        for cat2, ent2 in all_entities[i+1:]:
-            if ent1 != ent2:
-                relationship_type = determine_relationship_type(cat1, cat2)
-                relationships.append((ent1, relationship_type, ent2))
-    
-    return relationships
+    try:
+        relationships = []
+        
+        # Validate entities
+        if not isinstance(entities, dict):
+            logger.warning(f"Invalid entities type: {type(entities)}")
+            return relationships
+        
+        # Get all entity values in a list
+        all_entities = []
+        for category, items in entities.items():
+            if isinstance(items, list):
+                for item in items:
+                    all_entities.append((str(category), str(item)))
+        
+        # Create relationships between entities
+        for i, (cat1, ent1) in enumerate(all_entities):
+            for cat2, ent2 in all_entities[i+1:]:
+                if ent1 != ent2:
+                    relationship_type = determine_relationship_type(cat1, cat2)
+                    relationships.append(f"{ent1}_{relationship_type}_{ent2}")
+        
+        return relationships
+        
+    except Exception as e:
+        logger.error(f"Error extracting custom relationships: {str(e)}")
+        return []
 
-def determine_relationship_type(category1, category2):
+def determine_relationship_type(category1: str, category2: str) -> str:
     """Determine the type of relationship between two entity categories."""
-    if category1 == 'PROBLEM' and category2 == 'TEST':
-        return 'diagnosed_by'
-    elif category1 == 'PROBLEM' and category2 == 'TREATMENT':
-        return 'treated_by'
-    elif category1 == 'PROBLEM' and category2 == 'DRUG':
-        return 'treated_with'
-    elif category1 == 'PROBLEM' and category2 == 'ANATOMY':
-        return 'located_in'
-    else:
+    try:
+        # Define relationship mapping
+        relationship_map = {
+            ('PROBLEM', 'TEST'): 'diagnosed_by',
+            ('PROBLEM', 'TREATMENT'): 'treated_by',
+            ('PROBLEM', 'DRUG'): 'treated_with',
+            ('PROBLEM', 'ANATOMY'): 'located_in'
+        }
+        
+        # Get relationship type
+        return relationship_map.get((category1, category2), 'related_to')
+        
+    except Exception as e:
+        logger.error(f"Error determining relationship type: {str(e)}")
         return 'related_to'
