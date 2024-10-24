@@ -86,6 +86,9 @@ def main():
             logger.error("No data processed successfully. Exiting pipeline.")
             return
 
+        # Verify that processed_dataset has expected new metadata structure
+        # You may include additional checks or logs if necessary
+
         # Upload to Pinecone
         upload_to_pinecone(processed_dataset, config['pinecone']['index_name'])
 

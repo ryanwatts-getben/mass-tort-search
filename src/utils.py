@@ -96,10 +96,14 @@ def extract_case_and_document_id(key):
         return 'unknown_case_id', 'unknown_document_id', 'UNKNOWN'
 
 def prepare_metadata(examples: Dict[str, Any]) -> Dict[str, Any]:
-    """Prepare metadata for Pinecone upsert, ensuring size does not exceed MAX_METADATA_SIZE."""
+    """Prepare metadata for Pinecone upsert, ensuring all fields are strings and size does not exceed MAX_METADATA_SIZE."""
     try:
         metadata_list = []
-        for i in range(len(examples['cleaned_text'])):
+        num_examples = len(examples['cleaned_text'])
+        entities_list = examples.get('entities', [])
+        relationships_list = examples.get('relationships', [])
+
+        for i in range(num_examples):
             # Create base metadata
             metadata = {
                 'text': str(examples['cleaned_text'][i])[:TEXT_LIMIT],
@@ -108,57 +112,73 @@ def prepare_metadata(examples: Dict[str, Any]) -> Dict[str, Any]:
                 'page_number': str(examples['page_number'][i]),
             }
 
-            # Convert entities to flattened strings
-            entity_strings = []
-            if 'entities' in examples and examples['entities'][i]:
-                entities = examples['entities'][i]
+            # Add entities to metadata under respective keys if they exist
+            if i < len(entities_list) and entities_list[i]:
+                entities = entities_list[i]
                 for entity_type, entity_list in entities.items():
-                    if isinstance(entity_list, list):
+                    if isinstance(entity_list, list) and entity_list:
+                        # Ensure all entities are strings and filter out None values
+                        cleaned_entities = [str(e) for e in entity_list if e is not None]
                         # Limit number of entities per type
-                        limited_entities = entity_list[:ENTITY_LIMIT]
-                        # Format: "type:value"
-                        entity_strings.extend([f"{entity_type}:{str(e)}" for e in limited_entities])
+                        limited_entities = cleaned_entities[:ENTITY_LIMIT]
+                        # Add to metadata if list is not empty
+                        if limited_entities:
+                            metadata[entity_type] = limited_entities
 
-            # Convert relationships to flattened strings
-            relationship_strings = []
-            if 'relationships' in examples and examples['relationships'][i]:
-                relationships = examples['relationships'][i]
+            # Add relationships to metadata under separate keys if they exist
+            if i < len(relationships_list) and relationships_list[i]:
+                relationships = relationships_list[i]
                 if isinstance(relationships, dict):
+                    # Handle 'syntactic_relationships'
                     if 'syntactic' in relationships:
-                        relationship_strings.extend([
-                            f"syntactic:{str(t[0])}_{str(t[1])}_{str(t[2])}"
-                            for t in relationships['syntactic']
-                        ])
+                        syntactic_rels = [
+                            f"{str(t[0])}_{str(t[1])}_{str(t[2])}"
+                            for t in relationships.get('syntactic', [])
+                            if t is not None
+                        ]
+                        if syntactic_rels:
+                            metadata['syntactic_relationships'] = syntactic_rels
+                    # Handle 'custom_relationships'
                     if 'custom' in relationships:
-                        relationship_strings.extend([
-                            f"custom:{str(t)}"
-                            for t in relationships['custom']
-                        ])
+                        custom_rels = [
+                            str(t) for t in relationships.get('custom', []) if t is not None
+                        ]
+                        if custom_rels:
+                            metadata['custom_relationships'] = custom_rels
 
-            # Add flattened lists to metadata
-            metadata['entities'] = entity_strings if entity_strings else ["none"]
-            metadata['relationships'] = relationship_strings if relationship_strings else ["none"]
+            # Ensure all metadata values are acceptable types and remove any None values
+            metadata = validate_metadata(metadata)
 
             # Ensure metadata size does not exceed MAX_METADATA_SIZE
             metadata_json = json.dumps(metadata)
             metadata_size = sys.getsizeof(metadata_json)
             if metadata_size > MAX_METADATA_SIZE:
-                # Trim entities and relationships to reduce size
-                metadata['entities'] = metadata['entities'][:1]  # Keep only the first entity
-                metadata['relationships'] = []  # Remove relationships
+                logger.warning(f"Metadata size before trimming: {metadata_size} bytes")
+
+                # Trim entity lists for each entity type
+                entity_keys = [key for key in metadata.keys() if key in entities_list[i]]
+                for key in entity_keys:
+                    if isinstance(metadata[key], list) and len(metadata[key]) > 1:
+                        metadata[key] = metadata[key][:1]  # Keep only the first entity
+
+                # Trim relationships
+                if 'syntactic_relationships' in metadata:
+                    metadata['syntactic_relationships'] = metadata['syntactic_relationships'][:1]
+                if 'custom_relationships' in metadata:
+                    metadata['custom_relationships'] = metadata['custom_relationships'][:1]
 
                 # Recalculate metadata size
                 metadata_json = json.dumps(metadata)
                 metadata_size = sys.getsizeof(metadata_json)
 
-                logger.warning(f"Metadata size exceeded limit after trimming entities and relationships: {metadata_size} bytes")
+                logger.warning(f"Metadata size after trimming entities and relationships: {metadata_size} bytes")
 
                 if metadata_size > MAX_METADATA_SIZE:
                     # As a last resort, shorten the text
                     metadata['text'] = metadata['text'][:50]
                     metadata_json = json.dumps(metadata)
                     metadata_size = sys.getsizeof(metadata_json)
-                    logger.warning(f"Metadata size exceeded limit after trimming text: {metadata_size} bytes")
+                    logger.warning(f"Metadata size after trimming text: {metadata_size} bytes")
 
                     if metadata_size > MAX_METADATA_SIZE:
                         logger.error(f"Metadata size still exceeds MAX_METADATA_SIZE after trimming: {metadata_size} bytes")
@@ -170,14 +190,13 @@ def prepare_metadata(examples: Dict[str, Any]) -> Dict[str, Any]:
         return {**examples, 'metadata': metadata_list}
     except Exception as e:
         logger.error(f"Error preparing metadata: {str(e)}")
+        # Handle error appropriately, e.g., return empty metadata
         metadata_list = [{
             'text': '',
             'case_id': 'unknown',
             'document_id': 'unknown',
             'page_number': 'unknown',
-            'entities': ["none"],
-            'relationships': ["none"]
-        } for _ in range(len(examples['cleaned_text']))]
+        } for _ in range(len(examples.get('cleaned_text', [])))]
         return {**examples, 'metadata': metadata_list}
 
 def generate_report(results: List[Dict[str, Any]]):
@@ -197,3 +216,20 @@ def generate_report(results: List[Dict[str, Any]]):
         print(f"Score: {result.get('score', 0.0):.4f}")
         print(f"Text Snippet: {result.get('text', '')[:200]}...")  # Display first 200 characters
         print("-" * 80)
+
+def validate_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate and clean metadata to ensure it doesn't contain None values."""
+    clean_metadata = {}
+    for key, value in metadata.items():
+        if value is None:
+            # Remove keys with None values
+            continue
+        elif isinstance(value, list):
+            # Ensure all elements are strings and remove None values
+            cleaned_list = [str(v) for v in value if v is not None]
+            if cleaned_list:
+                clean_metadata[key] = cleaned_list
+        else:
+            # Convert other types to strings
+            clean_metadata[key] = str(value)
+    return clean_metadata

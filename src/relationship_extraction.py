@@ -42,8 +42,8 @@ def extract_relationships(dataset: Dataset) -> Dataset:
                         custom_rels = extract_custom_relationships(entities)
                         
                         relationships.append({
-                            'syntactic': deps,
-                            'custom': custom_rels
+                            'syntactic': deps if deps else [],
+                            'custom': custom_rels if custom_rels else []  # Ensure it's a list
                         })
                     except Exception as e:
                         logger.error(f"Error processing single text: {str(e)}")
@@ -91,42 +91,50 @@ def extract_custom_relationships(entities: Dict) -> List[str]:
         # Validate entities
         if not isinstance(entities, dict):
             logger.warning(f"Invalid entities type: {type(entities)}")
-            return relationships
+            return relationships  # Return empty list
         
         # Get all entity values in a list
         all_entities = []
         for category, items in entities.items():
             if isinstance(items, list):
                 for item in items:
-                    all_entities.append((str(category), str(item)))
+                    if item is not None:
+                        all_entities.append((str(category), str(item)))
+            else:
+                logger.warning(f"Expected list for entities[{category}], got {type(items)}")
         
         # Create relationships between entities
         for i, (cat1, ent1) in enumerate(all_entities):
             for cat2, ent2 in all_entities[i+1:]:
                 if ent1 != ent2:
                     relationship_type = determine_relationship_type(cat1, cat2)
-                    relationships.append(f"{ent1}_{relationship_type}_{ent2}")
+                    relationship_str = f"{ent1}_{relationship_type}_{ent2}"
+                    relationships.append(relationship_str)
         
         return relationships
         
     except Exception as e:
         logger.error(f"Error extracting custom relationships: {str(e)}")
-        return []
+        return []  # Return empty list on exception
 
 def determine_relationship_type(category1: str, category2: str) -> str:
     """Determine the type of relationship between two entity categories."""
     try:
+        # Convert categories to lowercase
+        category1 = category1.lower()
+        category2 = category2.lower()
+
         # Define relationship mapping
         relationship_map = {
-            ('PROBLEM', 'TEST'): 'diagnosed_by',
-            ('PROBLEM', 'TREATMENT'): 'treated_by',
-            ('PROBLEM', 'DRUG'): 'treated_with',
-            ('PROBLEM', 'ANATOMY'): 'located_in'
+            ('problem', 'test'): 'diagnosed_by',
+            ('problem', 'treatment'): 'treated_by',
+            ('problem', 'drug'): 'treated_with',
+            ('problem', 'anatomy'): 'located_in'
         }
-        
+
         # Get relationship type
         return relationship_map.get((category1, category2), 'related_to')
-        
+
     except Exception as e:
         logger.error(f"Error determining relationship type: {str(e)}")
         return 'related_to'

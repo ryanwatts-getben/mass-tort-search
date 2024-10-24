@@ -38,9 +38,12 @@ def process_entities_batch(examples: Dict[str, List[Any]], pipeline) -> Dict[str
                 ent_label = entity['entity_group']
                 ent_text = entity['word']
                 
-                if ent_label not in entities:
-                    entities[ent_label] = []
-                entities[ent_label].append(ent_text)
+                if ent_text is not None:
+                    if ent_label not in entities:
+                        entities[ent_label] = []
+                    entities[ent_label].append(ent_text)
+                else:
+                    logger.warning(f"Encountered None entity text for label {ent_label}")
             
             # Remove duplicates and sort
             for key in entities:
@@ -74,7 +77,7 @@ def extract_entities(dataset: Dataset) -> Dataset:
             framework="pt"
         )
 
-        # Process dataset directly through pipeline without unsupported parameters
+        # Process dataset directly through pipeline
         ner_results = ner_pipeline(dataset['cleaned_text'])
 
         # Process results into entities
@@ -82,17 +85,19 @@ def extract_entities(dataset: Dataset) -> Dataset:
         for text_entities in ner_results:
             entities = {}
             for entity in text_entities:
-                ent_label = entity['entity_group']
+                ent_label = entity['entity_group'].lower()  # Convert to lowercase
                 ent_text = entity['word']
-
-                if ent_label not in entities:
-                    entities[ent_label] = []
-                entities[ent_label].append(ent_text)
-
+                if ent_text is not None:
+                    if ent_label not in entities:
+                        entities[ent_label] = []
+                    entities[ent_label].append(ent_text)
+                else:
+                    logger.warning(f"Encountered None entity text for label {ent_label}")
+            
             # Remove duplicates and sort
             for key in entities:
                 entities[key] = sorted(list(set(entities[key])))
-
+            
             entities_list.append(entities)
 
         # Add entities to dataset

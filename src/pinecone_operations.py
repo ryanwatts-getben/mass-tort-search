@@ -1,17 +1,17 @@
 from pinecone.grpc import PineconeGRPC as Pinecone
+from pinecone import ServerlessSpec
 import os
 from dotenv import load_dotenv
 from transformers import AutoTokenizer, AutoModel
 import torch
 import logging
-from utils import load_config, setup_logging
+from utils import load_config, setup_logging, validate_metadata  # Added validate_metadata import
 from datasets import Dataset
 from typing import Dict, List, Any
 from tqdm import tqdm
 import numpy as np
 import sys
 import json
-
 
 # Set up logging
 logger = setup_logging()
@@ -74,6 +74,13 @@ def prepare_vectors(examples: Dict[str, List[Any]], batch_start_idx: int = 0) ->
                 # Use prepared metadata
                 metadata = examples['metadata'][i]
 
+                # Log metadata for debugging
+                logger.debug(f"Vector ID: {metadata['case_id']}_{metadata['document_id']}_{metadata['page_number']}_{batch_start_idx + i}")
+                logger.debug(f"Metadata: {json.dumps(metadata)}")
+
+                # Validate metadata
+                metadata = validate_metadata(metadata)
+
                 # Create vector data
                 vector_data = {
                     'id': f"{metadata['case_id']}_{metadata['document_id']}_{metadata['page_number']}_{batch_start_idx + i}",
@@ -99,8 +106,20 @@ def upload_to_pinecone(dataset: Dataset, index_name: str):
         if not validate_dataset(dataset):
             raise ValueError("Invalid dataset structure")
 
-        # Get index
-        index = pc.Index(index_name)
+        # Check if index exists, create if not
+        try:
+            index = pc.Index(index_name)
+            logger.info(f"Using existing index '{index_name}'.")
+        except Exception as e:
+            error_message = str(e)
+            if "Resource not found" in error_message or "Index not found" in error_message or "NOT_FOUND" in error_message:
+                logger.info(f"Index '{index_name}' not found. Creating a new index.")
+                dimension = config['pinecone']['dimension']  # Get dimension from config
+                pc.create_index(name=index_name, dimension=dimension, spec=ServerlessSpec(cloud="aws", region="us-east-1"))
+                index = pc.Index(index_name)
+            else:
+                logger.error(f"Error accessing index: {str(e)}")
+                raise e
 
         # Start with initial batch size
         batch_size = 100  # Start with 100 and adjust if necessary
@@ -127,11 +146,24 @@ def upload_to_pinecone(dataset: Dataset, index_name: str):
                             batch_size = max(1, batch_size // 2)
                             continue  # Retry with smaller batch size
 
-                        # Upsert following Pinecone format
-                        response = index.upsert(
-                            vectors=vectors,
-                            namespace="default"
-                        )
+                        # Final validation of metadata
+                        for vector in vectors:
+                            vector['metadata'] = validate_metadata(vector['metadata'])
+                            # Optionally, remove vector if metadata is empty
+                            if not vector['metadata']:
+                                logger.warning(f"Skipping vector with ID {vector['id']} due to empty metadata")
+                                vectors.remove(vector)
+
+                        if vectors:
+                            # Upsert following Pinecone format
+                            response = index.upsert(
+                                vectors=vectors,
+                                namespace="default"
+                            )
+                        else:
+                            logger.warning(f"No valid vectors to upload in batch starting at index {i}")
+                            i += len(batch)
+                            continue
 
                         # Update progress
                         uploaded_count = len(vectors)  # We know how many we sent
@@ -169,12 +201,16 @@ def search_pinecone(search_criteria: Dict, index_name: str) -> Dict:
     try:
         index = pc.Index(index_name)
         
-        # Convert search criteria to vector
+        # Convert search criteria to vector if using vector search
         search_vector = vectorize_search_criteria(search_criteria)
         
-        # Query index
+        # Build metadata filter based on new entity keys
+        metadata_filter = build_metadata_filter(search_criteria)
+        
+        # Query index with metadata filter
         results = index.query(
             vector=search_vector,
+            filter=metadata_filter,
             top_k=100,
             include_metadata=True,
             namespace="default"
@@ -185,6 +221,21 @@ def search_pinecone(search_criteria: Dict, index_name: str) -> Dict:
     except Exception as e:
         logger.error(f"Error in search_pinecone: {str(e)}")
         raise
+
+def build_metadata_filter(search_criteria: Dict) -> Dict:
+    """Construct metadata filter using the new per-entity-type metadata fields."""
+    try:
+        filter_dict = {}
+        for entity_type, terms in search_criteria.items():
+            if entity_type in ['test', 'problem', 'treatment', 'drug', 'anatomy']:
+                filter_dict[entity_type] = {"$in": terms}
+            else:
+                # Handle other metadata fields if necessary
+                pass
+        return filter_dict
+    except Exception as e:
+        logger.error(f"Error building metadata filter: {str(e)}")
+        return {}
 
 def vectorize_search_criteria(criteria: Dict) -> List[float]:
     """Vectorize search criteria."""

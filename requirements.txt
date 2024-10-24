@@ -10,3 +10,4 @@ spacy
 yake
 pyyaml
 numpy
+datasets

@@ -36,16 +36,16 @@ def calculate_custom_score(result):
 def calculate_entity_match_score(metadata):
     """Calculate a score based on the presence and relevance of entities."""
     score = 0
-    if 'PROBLEM' in metadata:
-        score += len(metadata['PROBLEM']) * 0.2
-    if 'TEST' in metadata:
-        score += len(metadata['TEST']) * 0.15
-    if 'TREATMENT' in metadata:
-        score += len(metadata['TREATMENT']) * 0.15
-    if 'DRUG' in metadata:
-        score += len(metadata['DRUG']) * 0.1
-    if 'ANATOMY' in metadata:
-        score += len(metadata['ANATOMY']) * 0.1
+    if 'problem' in metadata:
+        score += len(metadata['problem']) * 0.2
+    if 'test' in metadata:
+        score += len(metadata['test']) * 0.15
+    if 'treatment' in metadata:
+        score += len(metadata['treatment']) * 0.15
+    if 'drug' in metadata:
+        score += len(metadata['drug']) * 0.1
+    if 'anatomy' in metadata:
+        score += len(metadata['anatomy']) * 0.1
     return min(score, 1.0)  # Normalize to max of 1.0
 
 def calculate_date_relevance_score(metadata):

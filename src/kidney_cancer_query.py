@@ -57,55 +57,48 @@ def search_medical_records():
         # Initialize results list
         all_results = []
         
-        # Search terms to look for in metadata
+        # Search terms to look for in metadata (using new metadata keys)
         search_fields = {
             'test': criteria.get('DiagnosticProcedures', []) + criteria.get('LabResultsRedFlags', []),
             'problem': criteria.get('Symptoms', []) + criteria.get('PROBLEM', []),
             'treatment': criteria.get('TreatmentOptions', []) + criteria.get('TREATMENT', []),
         }
         
-        # Search for each term in each field
-        for field, terms in search_fields.items():
-            for term in terms:
-                try:
-                    # Format the term to match the flattened entity structure
-                    formatted_term = f"{field}:{term}"
-                    
-                    # Create metadata filter for entities field
-                    filter_dict = {
-                        'entities': {"$in": [formatted_term]}
-                    }
-                    
-                    # Query Pinecone with GRPC client
-                    query_response = index.query(
-                        vector=[0] * 768,  # Dummy vector since we're only using metadata filter
-                        filter=filter_dict,
-                        top_k=100,
-                        include_metadata=True,
-                        namespace="default"  # Add namespace parameter
-                    )
-                    
-                    # Process results (handle GRPC response format)
-                    for match in query_response.matches:  # Note: no ['matches'] indexing needed
-                        metadata = match.metadata
-                        result = {
-                            'case_id': metadata.get('case_id', 'unknown'),
-                            'document_id': metadata.get('document_id', 'unknown'),
-                            'page_number': metadata.get('page_number', 'unknown'),
-                            'text': metadata.get('text', '')[:200],
-                            'search_term': term,
-                            'field_matched': field,
-                            'score': match.score  # Note: direct attribute access
-                        }
-                        all_results.append(result)
-                        
-                except Exception as e:
-                    logger.error(f"Error searching for term '{term}' in field '{field}': {str(e)}")
-                    continue
+        # Build metadata filter using new entity keys
+        metadata_filter = {}
+        for entity_type, terms in search_fields.items():
+            if terms:
+                metadata_filter[entity_type] = {"$in": [term.lower() for term in terms]}
+        
+        # Query Pinecone index with metadata filter
+        query_response = index.query(
+            vector=[0] * 768,  # Dummy vector since we're only using metadata filter
+            filter=metadata_filter,
+            top_k=100,
+            include_metadata=True,
+            namespace="default"
+        )
+        
+        # Process results
+        for match in query_response.matches:
+            metadata = match.metadata
+            result = {
+                'case_id': metadata.get('case_id', 'unknown'),
+                'document_id': metadata.get('document_id', 'unknown'),
+                'page_number': metadata.get('page_number', 'unknown'),
+                'text': metadata.get('text', '')[:200],
+                'matched_entities': {
+                    'test': metadata.get('test', []),
+                    'problem': metadata.get('problem', []),
+                    'treatment': metadata.get('treatment', [])
+                },
+                'score': match.score
+            }
+            all_results.append(result)
         
         # Convert results to DataFrame and remove duplicates
         df_results = pd.DataFrame(all_results)
-        df_results = df_results.drop_duplicates(subset=['case_id', 'document_id', 'page_number', 'search_term'])
+        df_results = df_results.drop_duplicates(subset=['case_id', 'document_id', 'page_number'])
         
         # Sort by score
         df_results = df_results.sort_values('score', ascending=False)
