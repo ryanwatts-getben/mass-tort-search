@@ -1,32 +1,35 @@
 # AWS Configuration
 aws:
   region: us-east-1
+  cloud: aws
   s3:
     bucket: lovely-docs-2024-aba1a952-0384-45a3-87db-73f525b62b92
+    use_prefixes: false  # Toggle to use prefixes
     prefixes:
       - "1225"
-      # - "26192"
-      # - "279534"
-      # - "279451"
-      # - "281123"
-      # - "1229"
-      # - "1231"
-      # - "1237"
-      # - "1354"
-      # - "1470"
-      # - "21646"
-      # - "22654"
-      # - "23664"
-      # - "28527"
-      # - "2870"
-      # - "2871"
-      # - "2873"
-      # - "2874"
-      # - "2880"
+      - "26192"
+      - "279534"
+      - "279451"
+      - "281123"
+      - "1229"
+      - "1231"
+      - "1237"
+      - "1354"
+      - "1470"
+      - "21646"
+      - "22654"
+      - "23664"
+      - "28527"
+      - "2870"
+      - "2871"
+      - "2873"
+      - "2874"
+      - "2880"
+    max_workers: 100  # Maximum number of workers for concurrent processing
 
 # Pinecone Configuration
 pinecone:
-  index_name: medical-records20
+  index_name: lovely-full-text-search
   dimension: 768  # Set to the correct dimension for your embeddings
   batch_size: 100  # Recommended batch size for GRPC
   grpc:
@@ -41,7 +44,7 @@ data_processing:
 
 # Model Paths
 models:
-  ner: "samrawal/bert-base-uncased_clinical-ner"
+  ner: "emilyalsentzer/Bio_ClinicalBERT"
   bert: "medicalai/ClinicalBERT"
   zero_shot: "facebook/bart-large-mnli"
 
@@ -256,4 +259,3 @@ metadata:
   entity_limit: 5  # Limit for number of entities per type
   max_size: 39000  # Maximum metadata size in bytes (40KB)
   MAX_METADATA_SIZE: 40000  # Maximum metadata size in bytes (40KB)
-

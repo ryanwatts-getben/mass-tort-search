@@ -38,6 +38,16 @@ def extract_relationships(dataset: Dataset) -> Dataset:
                         doc = nlp(text[:1000000])  # Limit text length to prevent memory issues
                         deps = [(token.text, token.dep_, token.head.text) for token in doc]
                         
+                        # Initialize entities as empty lists if None
+                        if entities is None:
+                            entities = {}
+                        
+                        # Ensure all entity categories are lists
+                        for category in ['problem', 'treatment', 'test']:
+                            if category not in entities or not isinstance(entities[category], list):
+                                logger.warning(f"Expected list for entities[{category}], got {type(entities.get(category))}")
+                                entities[category] = []
+                        
                         # Extract custom relationships
                         custom_rels = extract_custom_relationships(entities)
                         

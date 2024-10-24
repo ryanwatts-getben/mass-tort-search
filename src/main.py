@@ -45,25 +45,36 @@ def main():
 
         # Data Ingestion with parallel processing
         bucket = config['aws']['s3']['bucket']
-        prefixes = config['aws']['s3']['prefixes']
+        use_prefixes = config['aws']['s3'].get('use_prefixes', True)
+        prefixes = config['aws']['s3'].get('prefixes', [])
 
-        # Process each prefix in parallel
-        with ThreadPoolExecutor() as executor:
-            futures = []
-            for prefix in prefixes:
-                future = executor.submit(ingest_data_from_s3, s3, bucket, prefix)
-                futures.append(future)
+        # Process each prefix in parallel if use_prefixes is True
+        if use_prefixes:
+            with ThreadPoolExecutor() as executor:
+                futures = []
+                for prefix in prefixes:
+                    future = executor.submit(ingest_data_from_s3, s3, bucket, prefix)
+                    futures.append(future)
 
-            # Collect results as datasets
-            raw_datasets = []
-            for future in futures:
-                try:
-                    dataset = future.result()
-                    if len(dataset) > 0:
-                        raw_datasets.append(dataset)
-                except Exception as e:
-                    logger.error(f"Error processing prefix: {str(e)}")
-                    continue
+                # Collect results as datasets
+                raw_datasets = []
+                for future in futures:
+                    try:
+                        dataset = future.result()
+                        if len(dataset) > 0:
+                            raw_datasets.append(dataset)
+                    except Exception as e:
+                        logger.error(f"Error processing prefix: {str(e)}")
+                        continue
+        else:
+            # Process all files in the bucket
+            logger.info("Processing all files in the bucket without prefix restriction")
+            dataset = ingest_data_from_s3(s3, bucket)
+            if len(dataset) > 0:
+                raw_datasets = [dataset]
+            else:
+                logger.error("No data retrieved from S3. Exiting pipeline.")
+                return
 
         # Concatenate datasets
         if raw_datasets:

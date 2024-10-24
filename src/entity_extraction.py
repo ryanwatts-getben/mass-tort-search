@@ -94,6 +94,11 @@ def extract_entities(dataset: Dataset) -> Dataset:
                 else:
                     logger.warning(f"Encountered None entity text for label {ent_label}")
             
+            # Ensure all expected categories are present as lists
+            for category in ['problem', 'treatment', 'test']:
+                if category not in entities:
+                    entities[category] = []
+
             # Remove duplicates and sort
             for key in entities:
                 entities[key] = sorted(list(set(entities[key])))

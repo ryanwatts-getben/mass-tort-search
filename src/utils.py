@@ -153,7 +153,7 @@ def prepare_metadata(examples: Dict[str, Any]) -> Dict[str, Any]:
             metadata_json = json.dumps(metadata)
             metadata_size = sys.getsizeof(metadata_json)
             if metadata_size > MAX_METADATA_SIZE:
-                logger.warning(f"Metadata size before trimming: {metadata_size} bytes")
+                # logger.warning(f"Metadata size before trimming: {metadata_size} bytes")
 
                 # Trim entity lists for each entity type
                 entity_keys = [key for key in metadata.keys() if key in entities_list[i]]
@@ -171,7 +171,7 @@ def prepare_metadata(examples: Dict[str, Any]) -> Dict[str, Any]:
                 metadata_json = json.dumps(metadata)
                 metadata_size = sys.getsizeof(metadata_json)
 
-                logger.warning(f"Metadata size after trimming entities and relationships: {metadata_size} bytes")
+                # logger.warning(f"Metadata size after trimming entities and relationships: {metadata_size} bytes")
 
                 if metadata_size > MAX_METADATA_SIZE:
                     # As a last resort, shorten the text
