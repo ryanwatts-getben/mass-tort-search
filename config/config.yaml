@@ -44,7 +44,7 @@ data_processing:
 
 # Model Paths
 models:
-  ner: "emilyalsentzer/Bio_ClinicalBERT"
+  ner: "samrawal/bert-base-uncased_clinical-ner"
   bert: "medicalai/ClinicalBERT"
   zero_shot: "facebook/bart-large-mnli"
 
